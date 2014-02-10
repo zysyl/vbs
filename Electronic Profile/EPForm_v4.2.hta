@@ -1,0 +1,1599 @@
+<html>
+
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<title>Morse Candidate Experience Profile</title>
+<!-- #region Persistent fold region -->
+<hta:application
+	applicationname="MyHTA"	
+	border="dialog"
+	borderstyle="normal"
+	caption="Morse Candidate Experience Profile"
+	contextmenu="yes"
+	icon="myicon.ico"
+	maximizebutton="yes"
+	minimizebutton="yes"
+	navigable="no"
+	scroll="no"
+	selection="no"
+	showintaskbar="yes"
+	singleinstance="yes"
+	sysmenu="yes"
+	version="1.0"
+	windowstate="maximize"
+>
+<!-- #endregion -->
+
+<script language="VBScript">
+
+
+' ======================================================================
+'  XML Procedures
+' ======================================================================
+'
+Sub createXML
+	' Create a blank xml file
+	Dim objXmlDoc, objRoot, objProcIns
+	Dim objEmp, objEmpId, objFirst, objLast
+	Dim objQuals, objGuiQual, objQual
+	Dim objProds, objGuiProd, objProd
+	Dim objAssignList, intCounter, objAssignCount, objSummary
+	
+	Set objXmlDoc = CreateObject("Microsoft.XMLDOM")
+	intCounter = 0
+	
+	' Add the root element To  our document
+	Set objRoot = objXmlDoc.createElement("EP")
+	objXmlDoc.appendChild objRoot
+	
+	Set objEmp = objXmlDoc.createElement("Employee")
+	objRoot.appendChild objEmp
+	
+	Set objEmpId = objXmlDoc.createElement("EmpId")
+	objEmpId.text = employee.empId.value
+	objEmp.appendChild objEmpId
+	
+	Set objFirst = objXmlDoc.createElement("Firstname")
+	objFirst.text = employee.firstName.value
+	objEmp.appendChild objFirst
+	
+	Set objLast = objXmlDoc.createElement("Lastname")
+	objLast.text = employee.lastName.value
+	objEmp.appendChild objLast
+	
+	' INSERT JOB TITLE HERE 
+		
+	' Iterate all the items in the qualification list
+	' and produce an element for each one
+	Set objQuals = objXmlDoc.createElement("Qualifications")
+	objRoot.appendChild objQuals
+	For Each objGuiQual In employee.qualList.options
+ 		Set objQual = objXmlDoc.createElement("Qual")
+ 		objQual.text = objGuiQual.text
+ 		objQuals.appendChild objQual
+ 	Next
+	
+	' Iterate all the items in the product list
+	' and produce an element for each one
+	Set objProds = objXmlDoc.createElement("Products")
+	objRoot.appendChild objProds
+	For Each objGuiProd In employee.prodList.options
+		Set objProd = objXmlDoc.createElement("Product")
+		objProd.text = objGuiProd.text
+		objProds.appendChild objProd
+	Next
+		
+	' Add the AssignmentList element with its counter attribute
+	Set objAssignList = objXmlDoc.createElement("AssignmentList")
+	objRoot.appendChild objAssignList
+	Set objAssignCount = objXmlDoc.createAttribute("count")
+	objAssignCount.text = CStr(intCounter)
+	objAssignList.setAttributeNode objAssignCount
+
+	' Add the summary text to the summary element
+	Set objSummary = objXmlDoc.createElement("Summary")
+	objSummary.text = employee.summary.value
+	objRoot.appendChild objSummary
+	
+	Set objProcIns = objXmlDoc.createProcessingInstruction("xml","version='1.0' encoding='ISO-8859-1'")
+	objXmlDoc.insertBefore objProcIns, objXmlDoc.childNodes(0)
+			
+	objXmlDoc.save(document.getElementById("xmlFilePath").value)	
+	
+	' New EP so no Assignments we can disable the subform
+	Call updateSubFormControls(intCounter)	
+	Call updateSubFormFlags (True)
+End Sub
+
+
+Sub getEP
+Dim objXmlDoc, objXmlEmployee, objXmlNode
+Dim objXmlQualification, objXmlQual
+Dim objXmlProduct, objXmlProd
+Dim objXmlSummary
+Dim objGuiNode, objGuiList
+Dim objXmlAssignment, objXmlDuties
+Dim strFilePath, intAssignCount, currentRef
+
+' **********************************************
+' VALIDATE THE EP FIRST BEFORE LOADING THE FILE
+' **********************************************
+
+strFilePath = document.getElementById("xmlFilePath").value
+'currentRef = document.getElementById("reference").value
+intAssignCount = getAssignCount()
+Set objXmlDoc = setXmlFile( strFilePath  )
+
+' Read in  all Employee data
+Set objXmlEmployee = objXmlDoc.selectNodes("EP/Employee/*")
+For Each objXmlNode In objXmlEmployee
+	Select Case objXmlNode.nodeName
+		Case "EmpId"
+			document.getElementById("empId").value = objXmlNode.text 
+		Case "Firstname"
+			document.getElementById("firstName").value = objXmlNode.text
+		Case "Lastname"
+			document.getElementById("lastName").value = objXmlNode.text
+	End Select	
+Next
+
+' Get all Qualification Data
+Set objXmlQualification = objXmlDoc.selectNodes("EP/Qualifications/*")
+For Each objXmlNode In objXmlQualification
+	Set objGuiNode = document.createElement("option")
+	objGuiNode.value = objXmlNode.text
+	objGuiNode.text = objXmlNode.text
+	employee.qualList.add(objGuiNode)	
+ Next
+
+
+' Get all Product Data
+Set objXmlProduct = objXmlDoc.selectNodes("EP/Products/*")
+For Each objXmlNode In objXmlProduct
+	Set objGuiNode = document.createElement("option")
+	objGuiNode.value = objXmlNode.text
+	objGuiNode.text = objXmlNode.text
+	employee.prodList.add(objGuiNode)
+Next
+
+assignCount = getAssignCount()
+' Check there are some assignments in this EP
+If assignCount >= 1 Then
+	firstAssignment = getFirstReference()
+ 	Call getAssignment( firstAssignment )
+ 	Call updateSubFormFlags( False )
+	Call updateSubFormControls( assignCount )
+	Call updateNavPrev( True )
+Else
+	Call updateSubFormControls( assignCount )
+	Call updateSubFormFlags( True )
+	Call updateNavNext( True )
+	Call updateNavPrev( True )	
+End If
+
+Set objXmlSummary = objXmlDoc.selectSingleNode("EP/Summary")
+document.getElementById("summary").value = objXmlSummary.text
+
+End Sub
+
+
+Sub setEP
+
+Dim objXmlDoc, objXmlEmployee, objXmlNode
+Dim objXmlQualification, objXmlQual
+Dim objXmlProduct, objXmlProd
+Dim objXmlSummary
+Dim objGuiNode, objGuiList
+Dim objXmlAssignment, objXmlDuties
+Dim strFilePath, intAssignCount, currentRef
+
+strFilePath = document.getElementById("xmlFilePath").value
+currentRef = document.getElementById("reference").value
+intAssignCount = getAssignCount()
+Set objXmlDoc = setXmlFile( strFilePath  )
+
+' Save all Employee data
+Set objXmlEmployee = objXmlDoc.selectNodes("EP/Employee/*")
+For Each objXmlNode In objXmlEmployee
+	Select Case objXmlNode.nodeName
+		Case "EmpId"
+			objXmlNode.text = document.getElementById("empId").value
+		Case "Firstname"
+			objXmlNode.text = document.getElementById("firstName").value
+		Case "Lastname"
+			objXmlNode.text = document.getElementById("lastName").value
+	End Select	
+Next
+
+' Save all Qualification Data
+Set objXmlQualification = objXmlDoc.selectNodes("EP/Qualifications/*")
+' Clear out any qualifications from the XML document
+For Each objXmlNode In objXmlQualification
+	objXmlNode.parentNode.removeChild( objXmlNode )
+Next
+
+Set objXmlQualification = objXmlDoc.selectSingleNode("EP/Qualifications")
+Set objGuiList = employee.qualList.options
+' Add in all of the qualifications from the GUI to XML
+For Each objGuiNode In objGuiList
+	Set objXmlQual = objXmlDoc.createElement("Qual")
+	objXmlQual.text = objGuiNode.text
+	objXmlQualification.appendChild objXmlQual
+Next
+
+' Save all Product Data
+Set objXmlProduct = objXmlDoc.selectNodes("EP/Products/*")
+For Each objXmlNode In objXmlProduct
+	objXmlNode.parentNode.removeChild( objXmlNode )
+Next
+
+Set objXmlProduct = objXmlDoc.selectSingleNode("EP/Products")
+Set objGuiList = employee.prodList.options
+For Each objGuiNode In objGuiList
+	Set objXmlProd = objXmlDoc.createElement("Product")
+	objXmlProd.text = objGuiNode.text
+	objXmlProduct.appendChild objXmlProd
+Next
+
+assignCount = getAssignCount()
+If assignCount >= 1 Then
+	Set objXmlAssignment = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+currentRef+"]/*")
+	Set objXmlDuties = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+currentRef+"]/DutyList/*")
+		
+	For Each objXmlNode In objXmlAssignment
+		Select Case objXmlNode.nodeName
+			Case "Industry"				
+				objXmlNode.text = document.getElementById("industry").value
+			Case "Reference"
+				objXmlNode.text = document.getElementById("reference").value
+			Case "Position"
+				objXmlNode.text = document.getElementById("position").value
+			Case "Duration"
+				objXmlNode.text = document.getElementById("duration").value
+			Case "Description"
+				objXmlNode.text = document.getElementById("description").value
+		End Select		
+	Next
+	
+	' update each duty element
+	For Each objXmlNode In objXmlDuties
+		strId = objXmlNode.getAttribute("id")
+		objXmlNode.text = document.getElementById( strId ).value		
+	Next
+End If
+
+Set objXmlSummary = objXmlDoc.selectSingleNode("EP/Summary")
+objXmlSummary.text = document.getElementById("summary").value
+
+objXmlDoc.save(strFilePath)	
+
+End Sub
+
+
+Sub addAssignment
+
+Dim objXmlDoc, colAssignmentList
+Dim onjAssign, objIndustry, objRef, objPosition, objDuration, objDesc, objDuties
+Dim intCounter, colReference, intRef, currentIndex
+
+Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+
+Set objAssignmentList = objXmlDoc.selectSingleNode("/EP/AssignmentList")
+' Add the assignment element to the assignment list
+intCounter = CInt( objAssignmentList.getAttribute("count") )
+
+' Save the current assignment before adding another and updating the GUI
+If intCounter >= 1 Then	
+	' Save the current Assignment
+	Call setAssignment( True )
+End If
+
+Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+Set objAssignmentList = objXmlDoc.selectSingleNode("/EP/AssignmentList")
+' Add the assignment element to the assignment list
+intCounter = CInt( objAssignmentList.getAttribute("count") )
+
+intCounter = intCounter + 1
+objAssignmentList.setAttribute "count",CStr(intCounter)
+Set objAssign = objXmlDoc.createElement("Assignment")
+objAssignmentList.appendChild objAssign
+
+' Clear the subform GUI elements
+Call clearSubform( False )
+
+Set objRef = objXmlDoc.createElement("Reference")
+If (intCounter > 1) Then		
+	objRef.text = Cstr(intCounter)
+	Set colReference = objXmlDoc.getElementsByTagName("Reference")
+	intRef = CInt( colReference.item(colReference.length-1).text) + 1	
+	objRef.text = CStr(intRef)
+Else
+	intRef = intCounter
+	objRef.text = Cstr(intRef)
+End If
+objAssign.appendChild objRef
+
+Set objIndustry = objXmlDoc.createElement("Industry")
+objIndustry.text = document.getElementById("industry").value
+objAssign.appendChild objIndustry
+
+Set objPosition = objXmlDoc.createElement("Position")
+objPosition.text = document.getElementById("position").value
+objAssign.appendChild objPosition
+
+Set objDuration = objXmlDoc.createElement("Duration")
+objDuration.text = document.getElementById("duration").value
+objAssign.appendChild objDuration
+
+Set objDesc = objXmlDoc.createElement("Description")
+objDesc.text = document.getElementById("duration").value
+objAssign.appendChild objDesc
+
+Set objDuties = objXmlDoc.createElement("DutyList")
+objAssign.appendChild objDuties
+
+objXmlDoc.save (document.getElementById("xmlFilePath").value)
+
+' Update the GUI to show how many assignments are now in the XML document
+Call updateSubFormControls(intCounter)									' Enable the subform controls for input
+Call getAssignment( CStr(intRef) )
+ currentIndex = getAssignIndex( CStr(intRef) )
+Call updateSubFormFlags ( False )
+Call updateNavNext( True )
+
+End Sub
+
+
+Sub getAssignment( assignmentRef )
+' Using the assignment reference locate all the information 
+' for the associated assignment.
+Dim objXmlDoc, objAssignment, objNode, objDuties
+Dim objTable, objRow, strId
+
+Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+
+Set objAssignment = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+assignmentRef+"]/*")
+Set objDuties = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+assignmentRef+"]/DutyList/*")
+Set objTable = document.getElementById("duties")
+
+For Each objNode In objAssignment
+	Select Case objNode.nodeName
+		Case "Industry"
+			document.getElementById("industry").value = objNode.text
+		Case "Reference"
+			document.getElementById("reference").value = objNode.text			
+		Case "Position"
+			document.getElementById("position").value = objNode.text
+		Case "Duration"
+			document.getElementById("duration").value = objNode.text
+		Case "Description"
+			document.getElementById("description").value = objNode.text
+	End Select	
+Next
+
+Call remDutyTable
+
+For Each objNode In objDuties
+	strId = objNode.getAttribute("id")
+	Set objRow = objTable.insertRow(objTable.rows.length)
+	objRow.id = "dutyRow" + strId
+	objRow.insertCell(0).innerHTML = "<textarea cols='72' rows='3' id='" + strId + "'>" + objNode.text + "</textarea>" + _
+										"&nbsp;<input type='button' class='button' title='Remove this duty' value='-' onclick='remDuty("+strId+")'>"
+Next
+
+End Sub
+
+
+Sub setAssignment( save )
+	Dim objXmlDoc, objAssignment, objNode, objDuties, currentRef, strId
+	
+	Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+	
+	currentRef = document.getElementById("reference").value	
+	
+	Set objAssignment = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+currentRef+"]/*")
+	Set objDuties = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+currentRef+"]/DutyList/*")
+	
+	For Each objNode In objAssignment
+		Select Case objNode.nodeName
+			Case "Industry"				
+				objNode.text = document.getElementById("industry").value
+			Case "Reference"
+				objNode.text = document.getElementById("reference").value
+			Case "Position"
+				objNode.text = document.getElementById("position").value
+			Case "Duration"
+				objNode.text = document.getElementById("duration").value
+			Case "Description"
+				objNode.text = document.getElementById("description").value
+		End Select		
+	Next
+	
+	' update each duty element
+	For Each objNode In objDuties
+		strId = objNode.getAttribute("id")
+		objNode.text = document.getElementById( strId ).value		
+	Next
+	
+	objXmlDoc.save(document.getElementById("xmlFilePath").value)
+	
+End Sub
+
+
+Sub remAssignment
+	Dim objXmlDoc, objAssignment, objAssignmentList
+	Dim intCounter, delRef, colRef, intRef, currentIndex
+	
+	delRef = document.getElementById("reference").value
+	
+	Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+	
+	' Find the assignment and delete it
+	Set objAssignment = objXmlDoc.selectNodes("EP/AssignmentList/Assignment [Reference='"+delRef+"']")
+	For Each objNode In objAssignment
+		objNode.parentNode.removeChild(objNode)
+	Next
+	
+	' Update the AssignmentList attribute in XML
+	Set objAssignmentList = objXmlDoc.selectSingleNode("/EP/AssignmentList")
+	intCounter = CInt( objAssignmentList.getAttribute("count") )
+	intCounter = intCounter - 1
+	objAssignmentList.setAttribute "count",CStr(intCounter)
+	
+	objXmlDoc.save (document.getElementById("xmlFilePath").value)
+	
+	Set colRef = objXmlDoc.getElementsByTagName("Reference")
+	If colRef.length = 0 Then
+		' Nothing was found must have deleted the last entry
+		Call clearSubform( False )
+		Call updateSubFormControls( 0 )
+		Call updateSubFormFlags (true)
+		Call remDutyTable
+		Exit Sub
+	Else
+		intRef = colRef.item(0).text
+		Call getAssignment( intRef )
+		Call updateSubFormControls(intCounter)
+		currentIndex = getAssignIndex( intRef )
+		Call updateSubFormFlags (false)
+		Call updateNavPrev( True )
+	End If
+	
+End Sub
+
+
+Sub getNextAssignmentRef
+
+	' using the active assignment reference to locate the assignment in the xml doc
+	Dim currentRef, nextRef, colRef, intIndex, currentIndex
+	Dim objXmlDoc
+	
+	Call setAssignment( true )
+	
+	Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+	
+	currentRef = document.getElementById("reference").value			' Get the active assignment reference from hidden field
+	Set colRef = objXmlDoc.getElementsByTagName("Reference")		' Get a list of all the Assignment references in XML
+	intIndex = 0
+	
+	While intIndex <= colRef.length-1
+		If colRef.item(intIndex).text = currentRef Then				' Looking for the index of current reference
+			currentIndex = intIndex+1
+			nextRef = CInt(colRef.item(intIndex+1).text)
+		End If	
+		intIndex = intIndex + 1
+	Wend
+	
+	' Keep the integrity of the GUI state
+	' If we have already reached the last assignment then disable the next button
+	' and enable the previous button
+	'document.getElementById("navReference").innerHTML = currentIndex+1
+	If currentIndex+1 = colRef.length Then
+		updateNavPrev( False )
+		updateNavNext( True )
+	Else
+		updateNavPrev( False )
+		updateNavNext( False )
+	End If
+	
+	Call getAssignment( CStr(nextRef) )
+	
+	Call updateSubFormFlags( False )
+
+End Sub
+
+
+Sub getPrevAssignmentRef
+
+	Dim currentRef, prevRef, colRef, intIndex, currentIndex
+	Dim objXmlDoc
+	
+	Call setAssignment( True )
+	
+	Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+	
+	currentRef = document.getElementById("reference").value
+	Set colRef = objXmlDoc.getElementsByTagName("Reference")
+	intIndex = 0
+	
+	While intIndex <= colRef.length-1
+		If colRef.item(intIndex).text = currentRef Then			' Looking for the index of the current reference
+			currentIndex = intIndex	
+			prevRef = CInt(colRef.item(intIndex-1).text)
+		End If		
+	intIndex = intIndex + 1	
+	Wend
+	
+	'document.getElementById("navReference").innerHTML = currentIndex
+	If currentIndex = 1 Then
+		updateNavPrev( True )
+		updateNavNext( False )	
+	Else
+		updateNavPrev( False )
+		updateNavNext( False )
+	End If
+	
+	Call getAssignment( CStr(prevRef) )
+	Call updateSubFormFlags( False )
+End Sub
+
+
+' ======================================================================
+'  XML Functions
+' ======================================================================
+'
+Function setXmlFile( xmlFilePath )
+' Return an XMLDOM object to the xml filepath specified
+'
+	Dim objXmlDoc
+	Set objXmlDoc = CreateObject("Microsoft.XMLDOM")
+	objXmlDoc.async = False
+	objXmlDoc.load( xmlFilePath )
+	Set setXmlFile = objXmlDoc	
+		
+End Function
+
+Function getDutyCount( currentRef )
+' Return the number of duties for the current assignment
+'
+	Dim objXmlDoc, colDuties
+	
+	Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+	Set colDuties = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+currentRef+"]/DutyList/Duty")
+	
+	getDutyCount = colDuties.length
+
+End Function
+
+Function getFirstReference()
+Dim objXmlDoc, colRef
+Dim firstReference
+
+Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+Set colRef = objXmlDoc.getElementsByTagName("Reference")
+firstReference = colRef.item(0).text
+getFirstReference = firstReference
+
+End Function
+
+Function getAssignCount(  )
+Dim objXmlDoc, objAssignmentList
+
+Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+Set objAssignmentList = objXmlDoc.selectSingleNode("/EP/AssignmentList")
+
+getAssignCount = objAssignmentList.getAttribute("count")
+End Function
+
+Function getAssignIndex( currentRef )
+
+Dim objXmlDoc, colRef
+Dim intIndex, currentIndex
+Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+
+Set colRef = objXmlDoc.getElementsByTagName("Reference")		' Get a list of all the Assignment references in XML
+intIndex = 0
+
+While intIndex <= colRef.length-1	
+	If colRef.item(intIndex).text = currentRef Then				' Looking for the index of current reference
+		currentIndex = intIndex+1
+	End If	
+	intIndex = intIndex + 1
+Wend
+
+getAssignIndex = currentIndex
+
+End Function
+
+Function setNewDuty( currentRef )
+' Add a new duty to XML document and return the id for the new duty
+Dim objXmlDoc, objDutyList, objDuty, objId, dutyId, dutyCount
+
+Set objXmlDoc = setXmlFile( document.getElementById("xmlFilePath").value)
+
+' Append a Duty element to the DutyList element
+Set objDutyList = objXmlDoc.selectSingleNode("EP/AssignmentList/Assignment[Reference="+currentRef+"]/DutyList")
+Set objDuty = objXmlDoc.createElement("Duty")
+objDutyList.appendChild objDuty
+
+dutyCount = getDutyCount( currentRef )
+dutyId = setNewDutyId( currentRef, dutyCount )
+
+updateDutyCount( dutyCount+1 )
+
+' Set the id attribute of the new Duty element
+Set objId = objXmlDoc.createAttribute("id")
+objId.text = CStr(dutyId)
+objDuty.setAttributeNode objId
+
+objXmlDoc.save( document.getElementById("xmlFilePath").value )
+
+setNewDuty = dutyId
+
+End Function
+
+Function setNewDutyId( currentRef, dutyCount )
+Dim objXmlDoc, colDuties, newId, lastId
+
+	Set objXmlDoc = setXmlFile(document.getElementById("xmlFilePath").value)
+	Set colDuties = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+currentRef+"]/DutyList/Duty")
+	
+	If colDuties.length = 0 Then
+		newId = 1
+	Else
+		lastId = colDuties(dutyCount-1).getAttribute("id")
+		newId = CInt(lastId) + 1
+	End If
+	
+	setNewDutyId = newId
+
+End Function
+
+
+' ======================================================================
+' GUI Procedures
+' ======================================================================
+'
+Sub browseFolders
+
+Dim objShell, objFolder, objSelectedFolder, objPath
+
+Set objShell = CreateObject("Shell.Application")
+Set objFolder = objShell.BrowseForFolder(0,"Select a folder to store your new EP",0)
+
+If objFolder Is Nothing Then
+	' Do nothing
+Else
+	Set objSelectedFolder = objFolder.Self
+	objPath = objSelectedFolder.path	
+	document.getElementById("folderPath").value = objPath
+	document.getElementById("folderPath").disabled = True
+End If
+
+End Sub
+
+
+Sub showOpenDialog
+	Dim objDialog
+	Dim intResult
+	Dim strFolderPath, strFileName, strFullPath
+	
+	Set objDialog = CreateObject("UserAccounts.CommonDialog")
+		
+	objDialog.Filter = "XML Files|*.xml"
+	objDialog.InitialDir = "."
+	intResult = objDialog.ShowOpen
+	
+	If intResult <> 0 Then
+		strFullPath = Split(objDialog.FileName,"\")
+		strFileName = strFullPath( UBound(strFullPath) )
+		strFolderPath = Replace(objDialog.FileName,strFileName,"")
+		document.getElementById("folderPath").value = strFolderPath
+		document.getElementById("fileName").value = strFileName		
+	End If
+	
+End Sub
+
+
+Sub showFileLayer(intFormType)
+' Header text
+Const NEW_FORM_HEADER = "Create new file"
+Const OLD_FORM_HEADER = "Open existing file"
+
+' Info text
+Dim strNewFormInfo
+strNewFormInfo = "<br />By default your new EP file will be saved to the current working directory. " + _
+				  " To change this location, click on the <b>'...'</b> button below. <br />" + _
+				   " Additionally, you must provide a valid filename for your new EP. " + _
+				    "This must have a <b>'.xml'</b> file extension. <br /><br />"
+Dim strOldFormInfo
+strOldFormInfo = "<br />To open an existing EP, please click on the <b>'...'</b> button below. " + _
+				  "The file you select must be an <b>xml</b> document.<br /> <br />"
+
+' Button HTML
+Dim strNewButtonHtml : strNewButtonHtml = "<input type='button' class='button' value='...' onclick='browseFolders' title='Browse Folders'>"
+Dim strOldButtonHtml : strOldButtonHtml = "<input type='button' class='button' value='...' onclick='showOpenDialog' title='Browse Files'>"
+Dim strNewOkButtonHtml : strNewOkButtonHtml = "<input type='button' class='fileLayerButton' value='OK' onclick='showMainForm(0)'>"
+Dim strOldOkButtonHtml : strOldOkButtonHtml = "<input type='button' class='fileLayerButton' value='OK' onclick='showMainForm(1)'>"
+
+' Current Directory
+Dim strCurrentDir : strCurrentDir = getCurrentDirectory + "\"
+
+document.getElementById("fileLayer").style.display = "block"
+
+If intFormType = 0 Then
+	document.getElementById("fileLayerHeader").innerHTML = NEW_FORM_HEADER
+	document.getElementById("fileLayerInfo").innerHTML = strNewFormInfo
+	document.getElementById("browseBtnLayer").innerHTML = strNewButtonHtml
+	document.getElementById("fileLayerOk").innerHTML = strNewOkButtonHtml
+	document.getElementById("folderPath").value = strCurrentDir
+	document.getElementById("folderPath").disabled = True
+	document.getElementById("fileName").value = ""
+	document.getElementById("fileName").focus	
+ElseIf intFormType = 1 Then
+	document.getElementById("fileLayerHeader").innerHTML = OLD_FORM_HEADER
+	document.getElementById("fileLayerInfo").innerHTML = strOldFormInfo
+	document.getElementById("browseBtnLayer").innerHTML = strOldButtonHtml	
+	document.getElementById("fileLayerOk").innerHTML = strOldOkButtonHtml
+	document.getElementById("folderPath").value = ""
+	document.getElementById("fileName").value = ""
+End If
+
+
+End Sub
+
+
+Sub showMainForm( intEp )
+	Dim userInput
+	Select Case intEp
+		Case 0
+			' validate user input
+			If validFileLayer Then
+			
+				Call setXmlFilePath
+			
+				If fileExists Then
+					userInput = MsgBox ("The filename you provided already exists in the location specified." + Chr(13) + Chr(13) + _
+						    	"Would you like to replace the existing file?" + Chr(13) + Chr(13) + _
+						     	"Folder: " + document.getElementById("folderPath").value + Chr(13) + _					     
+						      	"File: " + document.getElementById("fileName").value, 36,"File already exists")
+						
+						If userInput = 6 Then
+							Call createXML
+							document.getElementById("initLoad").style.display = "none"
+							document.getElementById("fileLayer").style.display = "none"
+							document.getElementById("formContainer").style.display = "block"	
+							document.getElementById("docInfo").innerHTML = document.getElementById("xmlFilePath").value					
+						End If
+				Else
+					Call createXML
+					document.getElementById("initLoad").style.display = "none"
+					document.getElementById("fileLayer").style.display = "none"
+					document.getElementById("formContainer").style.display = "block"	
+					document.getElementById("docInfo").innerHTML = document.getElementById("xmlFilePath").value			
+				End If
+			Else
+				MsgBox "You have entered an invalid filename. To proceed please enter a valid filename.",17,"Invalid input"
+			End If
+			
+		Case 1
+			If validFileLayer Then
+			
+				Call setXmlFilePath
+				If fileExists Then
+					Call getEP
+					' hide initLoad and fileLayers
+					' show container layer
+					document.getElementById("initLoad").style.display = "none"
+					document.getElementById("fileLayer").style.display = "none"
+					document.getElementById("formContainer").style.display = "block"
+					document.getElementById("docInfo").innerHTML = document.getElementById("xmlFilePath").value
+				Else
+					MsgBox "The filename you provided does not exist in the location specified." + Chr(13) + Chr(13) + _
+							    	"Please check the information you provided and try again?" + Chr(13) + Chr(13) + _
+							     	"Folder: " + document.getElementById("folderPath").value + Chr(13) + _					     
+							      	"File: " + document.getElementById("fileName").value, 17,"File does not exist"
+				End If
+				
+			Else
+				MsgBox "You have entered an invalid filename. To proceed please enter a valid filename.",17,"Invalid input"
+			End If
+			
+	End Select
+	
+	
+End Sub
+
+
+Sub addToList (whatButton)
+	Dim objOption
+	' Depending on what button was clicked will determine what listbox and textbox we target
+	
+	Select Case whatButton.id
+	
+		Case "addQual"
+			'employee.qualList.name
+			'employee.qual.name	
+			If Not Trim(employee.qual.value) = "" Then
+				Set objOption = document.createElement("option")
+				objOption.value = employee.qual.value
+				objOption.text = employee.qual.value
+				employee.qualList.add(objOption)
+				employee.qual.value = ""
+			End If
+						
+		Case "addProd"
+			If Not trim(employee.prod.value) = "" Then	 			
+		 		Set objOption = document.createElement("option")
+				objOption.value = employee.prod.value
+		 		objOption.text = employee.prod.value		
+		 		employee.prodList.add(objOption)
+		 		employee.prod.value = ""
+ 			End If	
+	
+	End Select
+
+End Sub
+
+
+Sub removeFromList (whatButton)
+	Dim objOption
+	Select Case whatButton.id
+		Case "remQual"
+			For Each objOption In employee.qualList.options
+				If objOption.Selected Then
+					employee.qual.value = objOption.text
+					objOption.RemoveNode
+					Exit Sub
+				End If
+			Next
+		Case "remProd"
+			For Each objOption In employee.prodList.options
+				If objOption.Selected Then
+					employee.prod.value = objOption.text
+					objOption.RemoveNode
+					Exit Sub
+				End If
+			Next
+		
+	End Select
+		
+End Sub
+
+
+Sub updateSubFormControls( countVal )
+	' Enable or disable the sub form elements
+	' depending on the current assignment count
+	Dim counter
+' #region Persistent fold region
+	Select Case countVal
+		' There are no Assignments so disable everything
+		Case 0
+			document.getElementById("subDelete").disabled = True
+			' document.getElementById("subUpdate").disabled = True
+			document.getElementById("subClear").disabled = True			
+			document.getElementById("navNext").disabled = True
+			document.getElementById("navPrev").disabled = True
+			document.getElementById("industry").disabled = True
+			document.getElementById("position").disabled = True
+			document.getElementById("duration").disabled = True
+			document.getElementById("description").disabled = True
+			document.getElementById("subAddDuty").disabled = True
+			
+		' There is one Assignment enable everything bar next and previous buttons
+		Case 1
+			document.getElementById("subDelete").disabled = False
+			'document.getElementById("subUpdate").disabled = False
+			document.getElementById("subClear").disabled = False
+			document.getElementById("industry").disabled = False		
+			document.getElementById("position").disabled = False
+			document.getElementById("duration").disabled = False
+			document.getElementById("description").disabled = False
+			document.getElementById("subAddDuty").disabled = False
+				
+		' There are multiple Assignments enable everything
+		Case Else
+			document.getElementById("subDelete").disabled = False
+			'document.getElementById("subUpdate").disabled = False
+			document.getElementById("subClear").disabled = False
+			document.getElementById("navNext").disabled = False
+			document.getElementById("navPrev").disabled = False	
+			document.getElementById("industry").disabled = False
+			document.getElementById("position").disabled = False
+			document.getElementById("duration").disabled = False
+			document.getElementById("description").disabled = False
+			document.getElementById("subAddDuty").disabled = False
+		
+	End Select
+	
+	If countVal = 1 Then
+		updateNavNext(True)			' disable the next button because we only have one assignment
+		updateNavPrev(True)			' disable the previous button
+	End If
+' #endregion
+End Sub
+
+
+Sub updateSubFormFlags( newEp )
+' If this is a new EP then initialise GUI flags to zero
+
+	Dim dutyCount, assignCount, assignIndex
+	Dim currentRef
+	Dim intZero : intZero = 0
+	
+	If newEp Then
+		document.getElementById("assignmentCount").innerText = intZero
+		document.getElementById("navReference").innerText = intZero
+		document.getElementById("dutyCount").innerHTML = intZero
+	Else
+		currentRef = document.getElementById("reference").value
+		
+		' Update the total counter flag
+		assignCount = getAssignCount(  )
+		document.getElementById("assignmentCount").innerText = CStr(assignCount)
+		
+		assignIndex = getAssignIndex(currentRef)
+		document.getElementById("navReference").innerText = assignIndex
+		
+		dutyCount = getDutyCount(currentRef)
+		'MsgBox CStr( dutyCount )
+		document.getElementById("dutyCount").innerHTML = dutyCount
+	End If
+	
+End Sub
+
+
+Sub updateDutyCount( count )
+	document.getElementById("dutyCount").innerHTML = count
+End Sub
+
+
+Sub updateNavNext( setting )
+	document.getElementById("navNext").disabled = setting
+End Sub
+
+
+Sub updateNavPrev ( setting )
+	document.getElementById("navPrev").disabled = setting
+End Sub
+
+
+Sub clearSubform ( keepReference )
+' keep the reference if we are just clearing the data
+' if we are adding an assignment then we can remove the reference from the GUI
+Dim counter : counter = 0
+Dim objTable : Set objTable = document.getElementById("duties")
+
+	If keepReference = True Then													' We are clearing data so update the XML document				
+		document.getElementById("industry").value = ""
+		'document.getElementById("reference").value = ""
+		document.getElementById("position").value = ""
+		document.getElementById("duration").value = ""
+		document.getElementById("description").value = ""
+		
+		While counter <= objTable.rows.length-1
+			document.getElementById(counter+1).value = ""
+			counter = counter + 1
+		Wend
+		Call setAssignment(true)
+	Else
+		document.getElementById("industry").value = ""
+		document.getElementById("reference").value = ""
+		document.getElementById("position").value = ""
+		document.getElementById("duration").value = ""
+		document.getElementById("description").value = ""
+	End If	
+	
+End Sub
+
+
+Sub addDuty()
+
+' Insert a <tr> and <td> and <textarea> into the 
+' duties table
+Dim objTable, objRow, objCell
+Dim dutyId
+Dim currentRef : currentRef = document.getElementById("reference").value
+
+' Get a new id and assign it to the new textarea form element
+dutyId = setNewDuty(currentRef)
+
+Set objTable = document.getElementById("duties")
+Set objRow = objTable.insertRow(objTable.rows.length)
+Set objCell = objRow.insertCell(0)
+objRow.id = "dutyRow" + CStr(dutyId)
+objCell.innerHTML = "<textarea cols='72' rows='3' id='" + CStr(dutyId) + "'></textarea>" + _
+					 "&nbsp; <input type='button' class='button' value='-' title='Remove this duty' onclick='remDuty(" + CStr(dutyId) + ")'>"
+
+Call setAssignment( True )
+End Sub
+
+
+Sub remDuty( intDuty )
+Dim colTableRows, objTable
+Dim objXmlDoc, objDuties
+Dim objRow
+Dim strDuty
+strDuty = "dutyRow" + CStr(intDuty)
+Set objXmlDoc = setXmlFile( document.getElementById("xmlFilePath").value )
+Set colTableRows = document.getElementById("duties").rows
+
+For Each objRow In colTableRows
+	If objRow.id = strDuty Then
+		Set objTable = document.getElementById("duties")
+		objTable.deleteRow( objRow.rowIndex )
+		
+		Set objDuties = objXmlDoc.selectNodes("EP/AssignmentList/Assignment[Reference="+document.getElementById("reference").value+"]/DutyList/*")
+		For Each objXmlNode In objDuties
+			If objXmlNode.getAttribute("id") = CStr(intDuty) Then
+				objXmlNode.parentNode.removeChild( objXmlNode )
+			End If
+		Next
+		objXmlDoc.save(document.getElementById("xmlFilePath").value)
+		
+	End If
+Next
+
+Call updateSubFormFlags( False )
+
+End Sub
+
+
+Sub remDutyTable()
+Dim objTable
+Dim rowCount
+Dim rowIndex
+
+Set objTable = document.getElementById("duties")
+rowIndex = 1
+rowCount = objTable.rows.length
+
+If rowCount > 0 Then
+
+	While rowIndex <= rowCount
+		objTable.deleteRow()
+		rowIndex = rowIndex + 1
+	Wend
+	
+End If
+
+End Sub
+
+
+Sub goHome( intFromWhere )
+	Dim objGuiNode, objGuiList
+	Set objGuiList = employee.qualList.options
+	
+	' If closing when an EP is open then save it
+	If intFromWhere > 0 Then
+		setEP
+	End If
+		
+	' display the initLoad layer and hide every other layer
+	document.getElementById("initLoad").style.display = "block"
+	document.getElementById("fileLayer").style.display = "none"
+	document.getElementById("formContainer").style.display = "none"
+	
+	' Clear the main form
+	document.getElementById("empId").value = "" 
+	document.getElementById("firstName").value = ""
+	document.getElementById("lastName").value = ""
+	
+	' Clear all of the qualifications from the GUI
+	For Each objGuiNode In employee.qualList.options
+		objGuiNode.removeNode
+	Next
+	' Clear all of the products from the GUI
+	For Each objGuiNode In employee.prodList.options
+		objGuiNode.removeNode
+	Next
+	
+	' Clear the summary text
+	document.getElementById("summary").value = ""
+	
+	' Clear the file name from docInfo
+	document.getElementById("docInfo").innerHTML = ""
+End Sub
+
+
+Sub setXmlFilePath
+	Dim strFile
+	strFile = document.getElementById("folderPath").value + document.getElementById("fileName").value	
+	document.getElementById("xmlFilePath").value = strFile
+End Sub
+
+
+Sub showCode
+
+' Dim thisHTA
+' 
+' Set thisHTA  = CreateObject("InternetExplorer.Application")
+' thisHTA.ExecWB(2)
+document.getElementById("code").value = document.getElementById("duties").innerHTML
+
+
+End Sub
+
+' ======================================================================
+' GUI Functions
+' ======================================================================
+'
+Function getCurrentDirectory
+
+Dim objFso, objShell
+Dim strHomeDir
+
+Set objShell = CreateObject("WScript.Shell")
+strHomeDir = objShell.CurrentDirectory
+
+getCurrentDirectory = strHomeDir
+
+End Function
+
+
+Function fileExists
+' Check to see if the file path, specified within the GUI hidden element 
+' xmlFilePath already exists
+' Return: Boolean
+Dim objFso
+Set objFso = CreateObject("Scripting.FileSystemObject")
+
+If objFso.FolderExists( document.getElementById("folderPath").value ) Then
+	If objFso.FileExists( document.getElementById("xmlFilePath").value ) Then
+		fileExists = True
+	Else
+		fileExists = False
+	End If
+Else
+	fileExists = False
+End If
+
+End Function
+
+
+Function validFileLayer
+' Determine if the user has entered a file name
+' or if the user has entered a valid .xml filename
+'
+Dim validEntry
+
+If document.getElementById("fileName").value = "" Then
+	validEntry = False	
+ElseIf UCase(right(document.getElementById("fileName").value,4)) <> ".XML" Then	
+	validEntry = False
+Else
+	validEntry = True
+End If
+
+validFileLayer = validEntry
+
+End Function
+
+</script>
+
+
+<style type="text/css">
+<!-- #region Persistent fold region -->
+body 
+{	
+	font-family: Tahoma; background: #FFFFFF;
+}
+.logo
+{
+	position: absolute; left: 20px; top: 0px;
+	border: 0px solid;
+}
+.watermark
+{
+	height: 900px; width: 290px; 
+	position: absolute; left: 20px; top: 10px;
+	border: 0px solid; background: #FFFFAA;
+}
+.watermark p
+{
+	margin-left: 10px;
+	font-family: Helvetica; font-size: 20pt; color: #E4963C;
+}
+.watermark b
+{
+	position: relative; left: 10px;
+	font-family: Helvetica; font-size: 9pt; color: #E4963C;
+}
+.watermark span
+{
+	position: relative; left: 15px;
+	font-family: Helvetica; font-size: 9pt; color: #999999;
+}
+.container
+{
+	position: absolute; left: 325px; top: 20px; height: 800px; 
+}
+.marginRight
+{
+	position: absolute; left: 870px;
+}
+.subForm
+{
+	border: 0px; height: 350px; overflow-y: auto;
+	padding-left: 30px;
+}
+.assignments
+{
+	border-top: 1px solid #CCCCCC;
+	border-bottom: 1px solid #CCCCCC;
+	border-right: 1px solid #CCCCCC;
+	border-left: 1px solid #CCCCCC;
+}
+.initLoad
+{
+	position: absolute; left: 320px; top: 10px;
+}
+.initLoad input
+{
+	border: 1px solid #CCCCCC; 
+	background: #FFFFFF;
+	width: 80px; 
+	cursor: hand;
+}
+.fileLayer
+{
+	position: absolute; left: 420px; top: 105px;
+	width: 400px; background: #FFFFAA;
+	border: 1px solid #CCCCCC;
+}
+.fileLayerText
+{
+	width: 250px;
+}
+.fileLayerButton
+{
+	width: 80px;
+}
+th 
+{
+	text-align: left; font-weight: bold; color: #FFFFFF; background: #E4963C;
+}
+table, input, textarea, select
+{	
+	font-family: Tahoma; font-size: 9pt; 
+}
+input, textarea, select {
+	border: 1px solid #CCCCCC; 
+	background: #FFFFFF;
+}
+select
+{
+	width: 210px;
+}
+.buttonRow
+{
+	background: #FFFFAA;
+}
+.button, .addButton, .remButton, .navButton, .subButton, .glbButton, .fileLayerButton
+{
+	cursor: hand;
+}
+.subCheck
+{
+	border: 0px solid;
+}
+.subButton, .glbButton
+{
+	width: 80px;
+}
+#check
+{
+	border: 0px; background: #FFFFFF;
+}
+#seperate
+{
+	border-top: 1px solid #CCCCCC;
+	border-bottom: 1px solid #CCCCCC;
+}<!-- #endregion -->
+
+</style>
+</head>
+<body>
+
+<!-- <div class="logo"><img src="logo.gif"></div> -->
+
+<!-- WATERMARK LAYER -->
+<div class="watermark">
+	<!-- <img src="logo.gif"> -->
+	<p>Candidate Experience Profile</p>
+	<input type="hidden" id="xmlFilePath">
+	<b>File:</b><span id="docInfo"></span>
+	
+</div>
+<!-- END WATERMARK LAYER -->
+
+<!-- INITIAL LOAD LAYER -->
+<div class="initLoad" id="initLoad" style="display:block">
+	<table width="100%" border="0" cellpadding="2">
+		<tr>
+			<th colspan="2">What to do?</th>
+		</tr>
+		<tr>
+			<td colspan="2">
+				<br />
+				<ul type="square">
+				 <li>If you have an existing EP in xml format simply click the <b>Open</b> button below and then choose the file to load.</li>
+				 <li>If you do not have an existing EP in xml format, click <b>New</b> 
+				 	below and you will be asked to choose a file location and filename</li>
+				</ul>
+			</td>
+		</tr>
+		<tr>
+			<td>	<input type="button" value="Open" title="Open an existing EP" onclick="showFileLayer(1)"> </td>
+		</tr>
+		<tr>
+			<td>	<input type="button" value="New" title="Begin a new EP" onclick="showFileLayer(0)"> </td>	
+		</tr>
+	</table>
+</div>
+<!-- END INITIAL LOAD LAYER -->
+
+
+<!-- FILE LAYER SUBFORM -->
+<div id="fileLayer" class="fileLayer" style="display: none;">
+	<table border="0" cellpadding="4" cellspacing="0" width="100%" cellpadding="2">
+		<tr>
+		<th colspan="3"><span id="fileLayerHeader">INSERT HEADER</span></th>
+		</tr>
+		<tr>
+			<td id="fileLayerInfo" colspan="3">INSERT DETAILS</td>
+		</tr>
+		<tr>
+			<td align="right">Folder:</td>
+			<td>
+				<input type="text" id="folderPath" class="fileLayerText"  maxlength="255">	
+				<span id="browseBtnLayer"></span>			
+			</td>
+		</tr>
+		<tr>
+			<td align="right">Filename:</td>
+			<td colspan="2"><input type="text" id="fileName" class="fileLayerText"></td>
+		</tr>
+		<tr>
+			<td colspan="2">&nbsp;</td>
+		</tr>
+		<tr>
+			<td align="right" colspan="3">
+				<span id="fileLayerOk"></span>				
+				&nbsp;
+				<input type="button" class="fileLayerButton" value="Cancel" onclick="goHome(0)">
+			</td>
+		</tr>
+	</table>	
+</div>
+
+<!-- END FILE LAYER SUBFORM -->
+
+<!--
+<div id="marginRight" class="marginRight">
+	<input type="button" value="Show HTA" onclick="showCode">
+	<textarea cols="70" rows="60" id="code"></textarea>
+</div> -->
+
+
+<div class="container" id="formContainer" style="display: none">
+<table id="wrapper">
+	<form name="employee">
+	<!-- EMPLOYEE DETAILS -->
+	<tr>
+	 <td>
+		<table width="600px" border="0" cellpadding="2" cellspacing="0">
+			<tr>
+				<th colspan="4">Employee Details</th>
+			</tr>
+			<tr>
+				<td width="20%">Employee No</td>
+				<td align="left"><input type="text" name="empId"></td>
+			</tr>
+			<tr>	
+				<td>Firstname</td>
+				<td align="left"><input type="text" name="firstName"></td>		
+	
+				<td>Surname</td>
+				<td align="left"><input type="text" name="lastName"></td>
+			</tr>		
+			<tr>
+				<td>Job Title</td>
+				<td>
+					<select name="jobTitle">
+						<option>Desktop Support</option>
+						<option>Systems Engineer</option>
+						<option>Service Desk Analyst</option>
+					</select>
+				</td>
+			</tr>
+		</table>
+	 </td>
+	</tr>	
+	<!-- END EMPLOYEE DETAILS -->
+	
+	
+	<!-- EMPLOYEE QUALIFICATIONS -->
+	<tr>
+	 <td>
+	 	<table border="0" width="600px" cellpadding="2" cellspacing="1">
+	 		<tr>
+	 			<th colspan="3">Employee Qualifications</th>
+	 		</tr>
+	 		
+	 		<tr>
+	 			<td width="19.5%" valign="top">Qualification</td>
+	 			<td width="40%" valign="top">
+	 				<input style="width: 230px" name="qual" type="text">
+	 				 <input id="addQual" class="addButton" type="button" value="+" title="Add to qualification list" onclick="addToList(me)">
+	 				 <input id="remQual" class="remButton" type="button" value="-" title="Remove from qualification list" onclick="removeFromList(me)">	 		 				 			
+	 			</td>
+	 			<td width="40%">
+	 				<select size="4" name="qualList">	 					
+	 				</select>
+	 			</td>
+	 		</tr>
+
+	 	</table>
+	 </td>
+	</tr>
+	<!-- END EMPLOYEE QUALIFICATIONS -->
+	
+	
+	<!-- PRODUCT EXPERIENCE-->
+	<tr>
+	 <td>
+	 	<table border="0" width="600px" cellpadding="2" cellspacing="1">
+	 		<tr>
+	 			<th colspan="3">Product Experience</th>
+	 		</tr>
+	 		
+	 		<tr>
+	 			<td width="19.5%" valign="top">Product</td>
+	 			<td width="40%" valign="top">
+	 				<input style="width: 230px" name="prod" type="text">
+	 				<input id="addProd" class="addButton" type="button" value="+" title="Add to product list" onclick="addToList(me)">
+	 				<input id="remProd" class="remButton" type="button" value="-" title="Remove from product list" onclick="removeFromList(me)">
+	 			</td>
+	 			<td width="40%">
+	 				<select size="4" name="prodList">
+
+	 				</select>
+	 			</td>
+	 		</tr>
+
+	 	</table>
+	 </td>
+	</tr>
+	<!-- END PRODUCT EXPERIENCE -->
+
+	
+	<!-- ASSIGNMENTS -->
+	<tr>
+	<td>
+	
+		<table id="assignments" class="assignments" width="600px" cellpadding="2" cellspacing="0">
+			<tr>
+				<th colspan="2">Assignment Details</td>
+			</tr>	
+
+			<!-- BUTTON ROW -->
+			<tr class="buttonRow" id="updAssigns">
+					<td>					
+						<input class="subButton" type="button" value="New" id="subNew"
+								title="Add a new Assignment to this EP" onclick="addAssignment">	
+											
+						<!-- <input class="subButton" type="button" value="Update" id="subUpdate" 
+								title="Update assignment details" onclick="setAssignment"> -->
+								
+						<input class="subButton" type="button" value="Clear" id="subClear"
+								title="Clear data from current assignment" onclick="clearSubform(True)">					
+					</td>
+					<td align="right">
+						<input class="subButton" type="button" value="Delete" id="subDelete" 
+								title="Remove the current assignment" onclick="remAssignment">						
+					</td>
+			</tr>
+			<!-- END BUTTON ROW -->							
+			
+			<!-- ASSIGNMENT ENTRY -->
+			<tr>	
+						
+				<td align="left"  colspan="2">		
+				<div class="subForm">	
+					<table border="0" cellpadding="4" cellspacing="0" id="assignment" >
+						<tr>
+							<td>Industry</td>
+							<td align="left" width="30%"><input type="text" id="industry"></td>	
+							<td colspan="2"><input type="hidden" id="reference"</td>														
+						</tr>
+						
+						<tr>
+							<td>Position</td>
+							<td align="left" width="30%"><input type="text" id="position"></td>
+							<td>Duration</td>
+							<td align="left"><input type="text" id="duration"></td>
+						</tr>
+						
+						<tr>
+							<td valign="top">Description</td>
+							<td align="left" colspan="3"><textarea cols="77" rows="6" id="description"></textarea></td>					
+						</tr>
+						
+						<tr>
+							<td valign="top">
+								Duties &nbsp;(<span id="dutyCount">0</span>) &nbsp;
+								<input type="button" id="subAddDuty" 
+										class="addButton" value="+" title="Insert an assignment duty" onclick="addDuty">
+							</td>
+							<td valign="top" colspan="3" >	
+														
+								<table border="0" id="duties" cellpadding="0" cellspacing="0">
+								
+								</table>
+								
+							</td>
+						</tr>										
+					</table>	
+					</div>					
+				</td>
+				
+			</tr> 
+			<!-- END ASSIGNMENT ENTRY -->
+			
+			
+			<!-- ASSIGNMENT NAV ROW -->
+			<tr class="buttonRow" id="navAssigns" >					
+					<td>
+						<input class="button" id="navPrev" type="button" 
+							value="<" title="Previous Assignment" onclick="getPrevAssignmentRef">
+							&nbsp;<b>Assignment </b><b id="navReference"></b>&nbsp;
+						<input class="button" id="navNext" type="button" 
+							value=">" title="Next Assignment" onclick="getNextAssignmentRef">
+																							
+					</td>
+					<td align="right">						
+						<span id="assignmentCount"></span>
+						<span>&nbsp;assignments</span>
+					</td>
+			</tr>
+			<!-- ASSIGNMENT NAV ROW -->
+								
+		</table> 
+	 </td>
+	</tr>
+	<!-- END ASSIGNMENTS TABLE -->
+	
+	
+	<!-- EMPLOYEE SUMMARY -->
+	<tr>	
+	 <td>
+		<table width="600px" cellpadding="2">
+			<th>Employee Summary</th>
+			<tr>
+				<td align="center"><textarea id="summary" cols="110" rows="8"></textarea></td>
+			</tr>
+		</table>
+	 </td>
+	</tr>	
+	<!-- END EMPLOYEE SUMMARY -->
+	
+	
+	<!-- BUTTON ROW -->					
+	<tr>
+		<td align="right">
+			<input id="saveEP" class="glbButton" type="button" value="Save" title="Save this EP" onclick="setEp"> 
+			<input id="closeEp" class="glbButton" type="button" value="Close" title="Close this EP" onclick="goHome(1)">
+			<!-- ******* PERHAPS NOBODY WOULD WANT TO RESET AN ENTIRE EP 
+			<input id="clearEP" class="glbButton" type="button" value="Reset" title="Deletes any input so far"> -->
+		</td>	
+	</tr>
+	<!-- END BUTTON ROW -->
+	</form>
+	<tr><td></td></tr>
+</table>	
+<!-- END CONTAINER TABLE -->
+</div>
+
+</body>
+</html>

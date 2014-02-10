@@ -1,0 +1,113 @@
+'=======================================================================
+' NAME:		DriverDetection.wsf
+'
+' PURPOSE:	Queries Win32_PNPEntity to extract driver vendor and device ids
+'			for PCI devices or extracts driver name and device id.
+'			
+' USAGE:    CSCRIPT.EXE DriverDetection.wsf //JOB:DETECT_PCI
+'			CSCRIPT.EXE DriverDetection.wsf //JOB:DETECT_ALL
+'
+' NOTE:	    This script assumes common.vbs is within the same directory.
+'
+' MODIFIED: (1) 29-Jul-2011 Version 1.01: Update to WSF file to allow
+'            use of common functionality between scripts
+'=======================================================================
+<package>
+<job id = "DETECT_PCI">
+<script language="vbscript" src="common.vbs" />
+<script language="vbscript">   
+
+	Option Explicit
+	Dim glb_Logfile, glb_logFileExists, glb_ComputerModel, glb_ComputerOS, glb_ComputerArch
+	Dim objDevice, strEnumPattern, RegExp1, expressionmatched1, expressionmatch1
+	
+	glb_ComputerModel = Trim(GetComputerModel())
+	glb_ComputerOS = Trim(GetComputerOS())
+	glb_ComputerArch = Trim(GetOSArchitecture())
+		
+	' build up logfile name - should be indicative
+	Select Case glb_ComputerOS
+	
+		Case "Microsoft Windows XP Professional" : 
+			glb_Logfile = "XP_"
+		Case "Microsoft Windows 7 Professional" :
+			glb_Logfile = "W7_"	
+		Case "Microsoft Windows Pre-Execution Environment" :
+			glb_Logfile = "PE_"	
+	
+	End Select
+	
+	glb_Logfile = glb_Logfile & Replace( UCase(glb_ComputerArch) & "_" & UCase(glb_ComputerModel) , " ", "_" ) & "_PNP_Entity.txt"
+	Call CreateLocalLogFile(glb_Logfile)	
+	
+	Call WriteLogEntry( glb_Logfile, "Model: " & glb_ComputerModel )
+	Call WriteLogEntry( glb_Logfile, "OS   : " & glb_ComputerOS )
+	Call WriteLogEntry( glb_Logfile, "Arch : " & glb_ComputerArch )	
+	Call WriteLogEntry( glb_Logfile, "From : " & "WMI Class Win32_PNPEntity")
+	
+	For Each objDevice In GetObject("winmgmts:\\.\root\cimv2").ExecQuery("Select * from Win32_PnPEntity")	
+	
+		strEnumPattern = "PCI\\VEN_(\w{4})&DEV_(\w{4})&SUBSYS_(\w*)&" 'Regular expression to pull out the ven, dev and subsys into submatches
+		Set RegExp1 = New RegExp
+		With RegExp1
+			.Pattern = strEnumPattern
+			.IgnoreCase = True
+			.Global = True
+		End With
+		Set expressionmatched1 = RegExp1.execute(objDevice.PNPDeviceID)
+		For Each expressionmatch1 In expressionmatched1 		
+			Call WriteLogEntry( glb_Logfile, objDevice.PNPDeviceID & vbTab &_
+												objDevice.Name & vbTab &_
+											     expressionmatch1.submatches(0) & vbTab &_
+											      expressionmatch1.submatches(1)	)															  
+	 	Next
+	 		
+	Next
+	
+	Call WriteLogEntry( glb_Logfile, "From : " & "PCI32")
+	Call RunPCI32( glb_Logfile )
+	
+ </script>	
+</job>
+  
+<job id = "DETECT_ALL">
+  <script language="vbscript" src="common.vbs" />
+  <script language="vbscript">
+	Option Explicit
+	Dim glb_Logfile, glb_logFileExists, glb_ComputerModel, glb_ComputerOS, glb_ComputerArch
+	Dim objDevice, strEnumPattern, RegExp1, expressionmatched1, expressionmatch1
+	
+	glb_ComputerModel = Trim(GetComputerModel())
+	glb_ComputerOS = Trim(GetComputerOS())
+	glb_ComputerArch = Trim(GetOSArchitecture())
+	
+	
+	' build up logfile name - should be indicative
+	Select Case glb_ComputerOS
+	
+		Case "Microsoft Windows XP Professional" : 
+			glb_Logfile = "XP_"
+		Case "Microsoft Windows 7 Professional" :
+			glb_Logfile = "W7_"	
+		Case "Microsoft Windows Pre-Execution Environment" :
+			glb_Logfile = "PE_"	
+	
+	End Select
+	
+	glb_Logfile = glb_Logfile & Replace( UCase(glb_ComputerArch) & "_" & UCase(glb_ComputerModel) , " ", "_" ) & "_PNP_Entity.txt"
+	Call CreateLocalLogFile(glb_Logfile)	
+	
+	Call WriteLogEntry( glb_Logfile, "Model: " & glb_ComputerModel )
+	Call WriteLogEntry( glb_Logfile, "OS   : " & glb_ComputerOS )
+	Call WriteLogEntry( glb_Logfile, "Arch : " & glb_ComputerArch )
+	Call WriteLogEntry( glb_Logfile, "From : " & "WMI Class Win32_PNPEntity")
+	
+	For Each objDevice In GetObject("winmgmts:\\.\root\cimv2").ExecQuery("Select * from Win32_PnPEntity")						 		 				
+			Call WriteLogEntry( glb_Logfile, objDevice.PNPDeviceID & vbTab & objDevice.Name )															  
+	Next
+	
+	</script>
+</job>  
+
+
+</package>

@@ -1,0 +1,202 @@
+'=======================================================================
+' NAME:		EFTDeleteExpiredUsers.wsf
+' PURPOSE:	Delete user accounts from the server that have their
+'			EXPIRED date greater than today.  This is a "PURGE"
+'			process for expired users.  Provides a mechanism to
+'			exclude specific PERMISSION GROUP(s) from this process.
+'
+' USAGE:    CSCRIPT.EXE EFTDeleteExpiredUsers.wsf //JOB:DELETE_USERS
+'
+' NOTE:	    This script requires the web.config for the EFT Server configuration.
+' MODIFIED: (1) 05-Aug-2008 Version 1.07: Update to WSF file to allow
+'            use of common functionality between scripts
+'=======================================================================
+<package>
+<job id = "DELETE_USERS">
+<script language="vbscript" src="Common/commonfunctions.vbs"/>
+<script language="vbscript">
+
+    Option Explicit
+    
+    'constants used in log
+    Const ForReading = 1
+    Const ForWriting = 2
+    Const ForAppending = 8 
+    Const sLogFileName = "EFTDeleteExpiredAccounts_DeleteUsers.log"
+    
+    'use to exclude groups from the deletion process
+    Const txtGroups = ""
+    
+    'special groups
+    Dim arCmdGroups, arGroupUserList, arGroupsMembership
+    Dim bExistsInGroup, bExcludeGroups
+    
+    'eft server objects
+    Dim oServer, oSites, oSite, oUser
+
+    'used to iterate throughout sites and users
+    Dim i, j, k, l
+
+    'file system object used for logging for user's home folder removal
+    Dim oFSO: Set oFSO = CreateObject("Scripting.FileSystemObject")
+
+    '===================================
+    '====== MAIN SCRIPT ROUTINE ========
+    '===================================
+    Dim txtServer: txtServer = GetVariableValue("EFTServerIPAddress")
+    Dim txtAdminUserName: txtAdminUserName = GetVariableValue("EFTAdminUsername")
+    Dim txtAdminPasswd: txtAdminPasswd = decode64(GetVariableValue("EFTAdminPassword"))
+    Dim txtPort: txtPort = GetVariableValue("EFTServerPort")
+    Dim txtSiteID: txtSiteID = GetVariableValue("EFTSite")
+    Dim txtSettingsLevel: txtSettingsLevel = GetVariableValue("SettingsLevel")
+
+    If txtSiteID = "" Then
+	    txtSiteID = 1
+    End If
+
+    If((txtServer="")  OR (txtAdminUserName="") OR (txtAdminPasswd="") OR (txtPort="") ) Then
+	    Call Log("ERROR: Insufficient EFT server configuration information. Please verify the web.config file.")
+	    Call WScript.Quit( -1)
+    End If
+
+    bExcludeGroups = FALSE
+    If (Len(txtGroups) > 0) Then
+	    arCmdGroups = Split(txtGroups,",")
+	    bExcludeGroups = TRUE
+    End If
+
+    'instantiate the SFTPCOMInterface server object
+    Set oServer = WScript.CreateObject("SFTPCOMInterface.CIServer")
+
+    On Error Resume Next
+    oServer.Connect txtServer, txtPort, txtAdminUserName, txtAdminPasswd
+
+    If Err.Number <> 0 Then
+       Call Log("ERROR: Error connecting to '" & txtServer & ":" & txtPort & "' -- " & err.Description & " [" & CStr(err.Number) & "]")
+       WScript.Quit(255)
+    Else
+       Call Log("INFO: Successfully connected to '" & txtServer & "'" )
+    End If
+
+    On Error Goto 0
+
+    'process specified/all site(s) to delete the expired users
+    Set oSites = oServer.Sites
+
+    Dim arUsers, expdate
+    Dim sUserHomeFolder
+    Dim missingHomefolder
+    'determine the integer SiteID if a oSite Name is given:
+    Dim iSiteCount
+
+    If (Not isNumeric(txtSiteID)) Then
+	    'If intSite is sitename then retrieve the site by sitename
+	    for iSiteCount =  0 to oSites.Count  - 1
+		    set oSite = oSites.Item(iSiteCount)
+		    If LCase(Trim(oSite.Name)) = LCase(Trim(txtSiteID)) Then
+			    Exit For
+		    End If
+	    Next
+    Else   
+	    'fetch the site object corresponding to specified site
+	    Set oSite = oSites.SiteByID(CLng(txtSiteID))
+    End if
+
+    Call Log("INFO: Processing site " & txtSiteID & "['"  & oSite.Name & "']")
+	
+    'retrieve the list of users for the specified Settings Level
+    arUsers = oSite.GetSettingsLevelUsers(txtSettingsLevel)
+
+    'iterate throughout the list of EFT users for the specified setting level
+    For j = LBound(arUsers) to UBound(arUsers)
+		
+	    'possible to exclude groups from the deletion process
+	    bExistsInGroup = false
+	    If bExcludeGroups Then
+		    arGroups = oSite.GetPermissionGroupsOfUser(arUsers(j))
+		    'exclude the user if they are a member of a special group
+		    For k = LBound(arGroups) to UBound(arGroups)
+			    For l = LBound(arCmdGroups) to UBound(arCmdGroups)
+				    If arCmdGroups(l) = arGroups(k) Then
+					    bExistsInGroup = true
+				    End If
+			    Next
+		    Next
+	    End If
+
+	    'obtaining information about each user
+	    Set oUser = oSite.GetUserSettings( arUsers(j) )
+	    missingHomefolder = false
+	    With oUser
+		
+		    'expire account flag for account is set to true/false
+		    If .GetExpirationDate(expdate) Then
+                
+                 'if the current date is greater than the expiration date process the user
+			     If expdate < Date Then
+		
+				    Call Log("INFO: The EFT user '" & arUsers(j) & "' account has EXPIRED.  Account Expiration Date: " & expdate)
+					
+					'potential to exclude certain types of users
+				    If not bExistsInGroup Then
+						
+					    'get the home directory for the user
+					    on error resume next
+					    
+					    sUserHomeFolder = oSite.GetPhysicalPath(.GetHomeDirString())
+						if Err.number <> 0 then
+						    Call Log("WARNING: An error occurred while getting the user's home folder Physical Path. [" & Err.number & "] " & Err.Description)
+						    missingHomefolder = true
+						End if
+						
+						on error goto 0
+						
+					    'ensure the folder exists
+					    If oFSO.FolderExists(sUserHomeFolder) = true and not missingHomefolder Then
+                         
+                             'delete user's home folder
+					         oFSO.DeleteFolder( sUserHomeFolder )
+    						 
+						     'account for errors that may occur when deleting the user's home folder
+					         If Err.number <> 0 Then
+						          Call Log("ERROR: An error occurred while deleting the user's home folder. [" & Err.number & "] " & Err.Description)
+						          Call Log("HINT: Ensure appropriate NTFS permissions are set for the home folder " & sUserHomeFolder)
+					         End If
+
+					        'remove the EFT user
+					        oSite.RemoveUser arUsers(j)
+    						
+					        'log user removal
+					        Call Log("INFO: User '" & arUsers(j) & "' and home folder successfully DELETED")
+						
+					    'folder does not exist, just delete account
+				        Else
+					    
+				            'remove the EFT user
+					        oSite.RemoveUser arUsers(j)
+						    
+					        'log user removal
+					        Call Log("INFO: User '" & arUsers(j) & "' DELETED, home folder does not exist for the user.")
+						    
+					    End If 
+				    Else
+					    Call Log("INFO: User '" & arUsers(j) & "' *NOT* deleted because he is a member of one of the protected groups ['" & txtGroups & "']")
+				    End If
+			    End If
+		    End If
+	    End With
+	    Set oUser = nothing
+    Next 'loop to the next user in site
+    
+    'apply the eft changes
+    Call oServer.ApplyChanges()
+    
+    'release connection
+    Set oFSO = Nothing
+    Set oSites = Nothing
+    oServer.close
+    Set oServer = Nothing
+    
+    </script>
+  </job>
+</package>

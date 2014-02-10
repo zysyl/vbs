@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<settings>
+<sites>	
+	<site name="IEDublinCLN">		
+		<code>DUB</code>	
+		<buildServer>cln-vdata01</buildServer>
+		<buildSource>\departments\it\InfraRoot\SWD</buildSource>
+	    <susServer>CLN-WUS01.sbet-emea.ads</susServer>
+	    <rootComputerOU>OU=Computers,OU=BEC,OU=Ireland,DC=Sbet-EMEA,DC=ADS</rootComputerOU>
+		<workstationOU>OU=Workstations,OU=Computers,OU=BEC,OU=Ireland,DC=Sbet-EMEA,DC=ADS</workstationOU>
+	    <laptopOU>OU=Laptops,OU=Computers,OU=BEC,OU=Ireland,DC=Sbet-EMEA,DC=ADS</laptopOU>
+	    <vdiOU>OU=Computers,OU=BEC,OU=Ireland,DC=Sbet-EMEA,DC=ADS</vdiOU>
+	</site>
+	<site name="UKGuernseySTP">		
+		<code>STP</code>	
+		<buildServer>stp-vdata01</buildServer>
+		<buildSource>\departments\it\InfraRoot\SWD</buildSource>
+	    <susServer>FTL-WUS01.sbet-emea.ads</susServer>
+	    <rootComputerOU>OU=Computers,OU=STP,OU=Guernsey,DC=Sbet-EMEA,DC=ADS</rootComputerOU>
+		<workstationOU>OU=Workstations,OU=Computers,OU=STP,OU=Guernsey,DC=Sbet-EMEA,DC=ADS</workstationOU>
+	    <laptopOU>OU=Laptops,OU=Computers,OU=STP,OU=Guernsey,DC=Sbet-EMEA,DC=ADS</laptopOU>
+	    <vdiOU>OU=Computers,OU=STP,OU=Guernsey,DC=Sbet-EMEA,DC=ADS</vdiOU>
+	</site>		
+	<site name="UKLondonTWH">		
+		<code>LON</code>	
+		<buildServer>mor-vdata01</buildServer>
+		<buildSource>\departments\it\InfraRoot\SWD</buildSource>
+	    <susServer>MOR-WUS01.sbet-emea.ads</susServer>
+	    <rootComputerOU>OU=Computers,OU=TWH,OU=UK,DC=Sbet-EMEA,DC=ADS</rootComputerOU>
+	    <workstationOU>OU=Workstations,OU=Computers,OU=TWH,OU=UK,DC=Sbet-EMEA,DC=ADS</workstationOU>
+	    <laptopOU>OU=Laptops,OU=Computers,OU=TWH,OU=UK,DC=Sbet-EMEA,DC=ADS</laptopOU>
+	    <vdiOU>OU=VM Desktop,OU=Computers,OU=TWH,OU=UK,DC=Sbet-EMEA,DC=ADS</vdiOU>
+	</site>		
+</sites>
+</settings>

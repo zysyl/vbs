@@ -1,0 +1,549 @@
+'=======================================================================
+' NAME:	SendUploadNotification.wsf
+' PURPOSE:	The two jobs "ON_UPLOAD" and "ON_TIMER" work together to 
+'           send a notification mail to the account owner, whenever file(s)
+'			will be uploaded in that account. "ON_UPLOAD" creates a hidden temporary file
+'           within the temp user's home folder indicating an upload is in process.
+'           The "ON_TIMER" job periodically queries the home folders for EFT accounts
+'           and if a temp file is found a notification is sent to the account owner.  
+'           NOTE: Fetches the SMTP configuration, from Web.config file, located within the $\EFTAdhoc\Scripts folder
+'
+' USAGE:
+'		CSCRIPT.EXE SendUploadNotification.wsf //JOB:ON_UPLOAD %USER.LOGIN% %FS.VIRTUAL_PATH%
+'       CSCRIPT.EXE SendUploadNotification.wsf //JOB:ON_TIMER
+'
+' MODIFIED:	(1) 05-Aug-2008 Version 1.07: Update to WSF file to allow multiple jobs and shared functionality between scripts.
+'           Script now utilizes an external notification template and feature to truely turn on/off the email logo attachment.
+'=======================================================================
+<package>
+<job id = "ON_UPLOAD">
+<script language="vbscript" src="Common/commonfunctions.vbs"/>
+<script language="vbscript">
+
+    Option Explicit
+
+    'Constants
+    Const ForReading = 1
+    Const ForWriting = 2
+    Const ForAppending = 8
+    Const sLogFileName = "SendUploadNotification_OnUpload.log"
+
+    '===================================
+    '====== MAIN SCRIPT ROUTINE ========
+    '===================================
+    
+    'input args to script
+    Dim oArgs: Set oArgs = WScript.Arguments
+    Dim oFSO: Set oFSO = CreateObject("Scripting.FileSystemObject")
+
+    If(oArgs.count < 2) Then
+        'missing input arguments
+	    Call Log("ERROR: Incorrect number of parameters passed! [Number of arguments passed : " & oArgs.count &"]")
+	    Call Log("ERROR: Usage: cscript SendUploadNotification.wsf //JOB:ON_UPLOAD %USER.LOGIN% %FS.VIRTUAL_PATH%")
+	    Call WSCript.Echo(-1)
+    Else
+    	
+	    'eft account name from input args
+	    Dim sUserName: sUserName = trim(oArgs(0))
+    	
+	    'virtual path from input args
+	    Dim sVirtualPath: sVirtualPath = trim(oArgs(1))
+    	
+	    'create physical path from virtual path
+	    Dim sUploadedFile: sUploadedFile = trim(GetFileName(sVirtualPath))
+    	
+	    'EFT site name
+	    Dim strSiteName: strSiteName = GetVariableValue("EFTSite")
+	    Dim bSiteFound: bSiteFound = False
+    	
+	    'create SFTPCOMInterface object
+	    Dim oServer: Set oServer = WScript.CreateObject("SFTPCOMInterface.CIServer")
+    	
+	    If Err.Number <> 0 Then 			
+		    Call Log("ERROR: Failed to create SFTPCOMInterface server object. Ensure SFTPCOMInterface.dll is registered. [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    WScript.Quit
+	    End If
+    	
+	    'Get server, port, username, password of administrator for Local EFT Server from web.config
+	    Dim strServer: strServer =  GetVariableValue("EFTServerIPAddress")
+	    Dim strPort: strPort =  GetVariableValue("EFTServerPort")
+	    Dim strAdminUserName: strAdminUserName = GetVariableValue("EFTAdminUsername")
+	    Dim strAdminPasswd: strAdminPasswd = decode64(GetVariableValue("EFTAdminPassword"))
+    	
+	    Call oServer.Connect(strServer, strPort, strAdminUserName, strAdminPasswd)
+    	
+	    If Err.Number <> 0 Then		
+	        Call Log("ERROR: [" & Err.Number & "] " & Err.Description & " [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    Call Log("ERROR: Failed to connect to EFT Server. [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    Call Log("HINT: Ensure the  SFTPCOMInterface.dll is registered and the same as the one in the GS folder, also ensure the web.config and EFT are properly configured. [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    WScript.Quit(255)
+	    Else
+            Call Log("INFO: Connected to EFT Server. [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+	    End If
+    	
+	    Dim oSites: Set oSites = oServer.Sites
+	    Dim iSiteCount: iSiteCount = 0
+	    For iSiteCount = 0 To oSites.Count - 1
+		    'find local site
+		    Dim oSite: Set oSite = oSites.Item(iSiteCount)
+		    If LCase(Trim(oSite.Name)) =  LCase(Trim(strSiteName)) Then
+			    bSiteFound = True
+			    Call Log("INFO: Site found on EFT Server '" & strSiteName & "'. [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+			    Exit For
+		    End If
+	    Next
+	    
+	    If bSiteFound = False Then
+	        Call Log("ERROR: Site was not found on EFT Server.  Please check your web.config and EFT configuration. [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+	        WScript.Quit()
+	    End If 
+    	
+	    Dim strSiteRootFolder: strSiteRootFolder = oSite.GetRootFolder()
+    	
+	    'ensure root folder exists
+	    If strSiteRootFolder = "" Then
+		    Call Log("ERROR: Unable to find root folder for site " & strSiteRootFolder & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    WScript.Quit
+	    End If
+    	
+	    Dim oUser: Set oUser = oSite.GetUserSettings(sUserName)
+	    Dim strHomeFolder: strHomeFolder = oUser.GetHomeDirString()
+    	
+	    'ensure home folder exists
+	    If strHomeFolder = "" Then
+		    Call Log("ERROR: User(s) home folder not found " & strHomeFolder & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    WScript.Quit
+	    End If
+        ' This  lines cause a bug where a virtual folder may cause not save any file in 
+	    'strHomeFolder = Replace(strHomeFolder, "/", "\")
+	    'If Right(strSiteRootFolder, 1) = "\" Then
+		'    strSiteRootFolder = Left(strSiteRootFolder, Len(strSiteRootFolder) -1)
+	    'End If
+	    'If Right(strHomeFolder, 1) <> "\" Then
+		'    strHomeFolder = strHomeFolder & "\"
+	    'End If
+    	
+	    'Dim strUploadFolderPath: strUploadFolderPath = strSiteRootFolder & strHomeFolder 
+	    ' RG: This method works for local Folders and Virtual Folders
+	    Dim strUploadFolderPath: strUploadFolderPath = oSite.GetPhysicalPath(strHomeFolder)
+	    
+    	If Right(strUploadFolderPath, 1) <> "\" Then
+	        strUploadFolderPath = strUploadFolderPath & "\"
+        End If
+        
+	    Call Log("INFO: Home folder path " & strUploadFolderPath & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+	    'create waiting file
+	    Call Log("INFO: Attempting to create temp waiting for upload file. [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+	    Call CreateWaitingForUploadTempFile(strUploadFolderPath, sVirtualPath)
+    	
+    End If
+
+
+    '--------------------------------------------------
+    ' NAME: CreateWaitingForUploadTempFile
+    ' PURPOSE: Creates a hidden temp file containing a list of files uploaded
+    '--------------------------------------------------
+    Function CreateWaitingForUploadTempFile(strUploadFolderPath, strFileName)
+        
+        Dim strWaitFileName: strWaitFileName = "UPLOAD_NOTIFICATION.tmp"
+
+	    'retrieve the ".tmp" file from the account's home folder
+	    Dim strTempFilePath: strTempFilePath = strUploadFolderPath & strWaitFileName
+
+	    If Not oFSO.FileExists(strTempFilePath) then
+    	
+		    'creating the temporary "wait" file
+		    Call Log("INFO: Creating wait temp file " & strTempFilePath & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+    		
+		    Dim objFile: Set objFile = oFSO.CreateTextFile(strTempFilePath, true)
+		    objFile.WriteLine(strFileName & ";")
+            
+            'hiding file so user will not see the file from the WTC
+		    Call HideFile(strTempFilePath)
+
+		    If Err.Number <> 0 then
+			    Call Log("ERROR: An error occured creating the temporary file " & strWaitFileName & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+			    Exit Function
+		    Else
+			    Call Log("INFO: Successfully created the temporary file " & strWaitFileName & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+			    Call Log("INFO: Successfully appended file " & strFileName & " to the temporary file. [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    End If
+    		
+	    Else   
+		    'appending file name to the temporary "wait" file
+		    Call Log("INFO: Appending value to the temporary file " & strWaitFileName & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    Dim oFSOpen: Set oFSOpen = oFSO.OpenTextFile(strTempFilePath, 8, true)
+		    oFSOpen.WriteLine(strFileName & ";")
+    		
+		    If Err.Number <> 0 then
+			    Call Log("ERROR: An error occured appending to the temporary file " & strWaitFileName & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+			    Exit Function
+		    Else
+			    Call Log("INFO: Successfully appended file " & strFileName & " to the temporary file " & strWaitFileName & ". [SendUploadNotification.wsf, CreateWaitingForUploadTempFile()]")
+		    End If
+	    End If
+    				
+    End Function
+
+	</script>
+</job>
+<job id = "ON_TIMER">
+  	<script language="vbscript" src="Common/commonfunctions.vbs"/>
+    <script language="vbscript">
+    
+        Option Explicit
+
+        'Constants
+        Const ForReading = 1
+        Const ForWriting = 2
+        Const ForAppending = 8
+        Const sLogFileName = "SendUploadNotification_OnTimer.log"
+        Const sFindString_1 = "temporary account ("
+        Const sFindString_2 = ")"
+
+        Const SUBJECT	=	"Requested files are uploaded [%USERNAME%][%TIMESTAMP%]"
+        Const IMAGE_TITLE = "GlobalSCAPE"
+
+        Dim sFromID, sToEmail, sCC, sSubject, sBody
+        Dim txtImageLogo, txtImageLogoFileName, txtImageLogoFilePath
+
+        '===================================
+        '====== MAIN SCRIPT ROUTINE ========
+        '===================================
+        
+        Dim oFSO: Set oFSO = CreateObject("Scripting.FileSystemObject")
+
+        'EFT site name
+        Dim strSiteName: strSiteName = GetVariableValue("EFTSite")
+        Dim bSiteFound: bSiteFound = False
+    	
+        'create SFTPCOMInterface object
+        Dim oServer: Set oServer = WScript.CreateObject("SFTPCOMInterface.CIServer")
+    	
+        If Err.Number <> 0 Then 			
+            Call Log("ERROR: Failed to create SFTPCOMInterface server object. [SendUploadNotification.wsf, Main()]")
+            WScript.Quit
+        End If
+    	
+        'Get server, port, username, password of administrator for Local EFT Server from web.config
+        Dim strServer: strServer =  GetVariableValue("EFTServerIPAddress")
+        Dim strPort: strPort =  GetVariableValue("EFTServerPort")
+        Dim strAdminUserName: strAdminUserName = GetVariableValue("EFTAdminUsername")
+        Dim strAdminPasswd: strAdminPasswd = decode64(GetVariableValue("EFTAdminPassword"))
+        Dim strURLPattern : strURLPattern=GetVariableValue("URLPattern")
+        Dim bEmailTemplateFormat: bEmailTemplateFormat = GetVariableValue("EmailTemplateFormat")
+    	
+        'WScript.Echo("CONNECTION INFO: " & strServer & ", " & strPort & ", " & strAdminUserName & ", " & strAdminPasswd)
+        Call oServer.Connect(strServer, strPort, strAdminUserName, strAdminPasswd)
+    	
+        If Err.Number <> 0 Then		
+            Call Log("ERROR: Failed to connect to EFT Server. [SendUploadNotification.wsf, Main()]")
+            WScript.Quit(255)
+        Else
+            Call Log("INFO: Connected to EFT Server. [SendUploadNotification.wsf, Main()]")
+        End If
+    	
+        Dim oSites: Set oSites = oServer.Sites
+        Dim iSiteCount: iSiteCount = 0
+        For iSiteCount = 0 To oSites.Count - 1
+            'find local site
+            Dim oSite: Set oSite = oSites.Item(iSiteCount)
+            If LCase(Trim(oSite.Name)) =  LCase(Trim(strSiteName)) Then
+	            bSiteFound = True
+	            Call Log("INFO: Site found on EFT Server '" & strSiteName & "'. [SendUploadNotification.wsf, Main()]")
+	            Exit For
+            End If
+        Next
+    	
+        Dim strSiteRootFolder: strSiteRootFolder = oSite.GetRootFolder()
+    	
+        'ensure root folder exists
+        If strSiteRootFolder = "" Then
+            Call Log("ERROR: Unable to find root folder for site " & strSiteRootFolder & ". [SendUploadNotification.wsf, Main()]")
+            WScript.Quit
+        End If
+    	
+        'setting level for adhoc
+    	Dim strSettingLevel: strSettingLevel = trim(GetVariableValue("SettingsLevel"))
+    	Call Log("INFO: Ad-Hoc Settings Level set to '" & strSettingLevel & "'. [SendUploadNotification.wsf, Main()]")
+    	
+    	On Error Resume Next
+    	Dim arUsers: arUsers = oSite.GetSettingsLevelUsers(strSettingLevel)
+    	
+    	If Err.Number <> 0 Then
+    	    Call Log("ERROR: [" & Err.Number & "] " & Err.Description & ". [SendUploadNotification.wsf, Main()]")
+    	    Call Log("ERROR: An error occurred retrieving the specified Setting Level '" & strSettingLevel & "'. [SendUploadNotification.wsf, Main()]")
+    	    Call Log("HINT: Ensure Setting Level exists within EFT Server or change web.config configuration. [SendUploadNotification.wsf, Main()]")
+    	    Err.clear
+    	    WScript.Quit(-1)
+    	Else
+    	    Call Log("INFO: Processing '" & strSettingLevel & "' settings level users. [SendUploadNotification.wsf, Main()]")
+    	End If
+	    
+	    On Error goto 0
+		'iterate through all users in specified setting level searching for tmp files
+		Dim iCount
+		For iCount = LBound(arUsers) to UBound(arUsers)
+
+			Dim sUserName: sUserName = arUsers(iCount)
+			Dim oUser: Set oUser = oSite.GetUserSettings(sUserName)
+			
+			'retrieve home folder for user
+			Dim strHomeFolder: strHomeFolder = oUser.GetHomeDirString()
+        	
+            'ensure the user's home folder exists
+            If strHomeFolder = "" Then
+	            Call Log("ERROR: Unable to find home folder for eft user: '" & sUserName & "'. Home Folder Path: " & strHomeFolder & ". [SendUploadNotification.wsf, Main()]")
+	            WScript.Quit(-1)
+            End If
+
+            'strHomeFolder = Replace(strHomeFolder, "/", "\")
+            'If Right(strSiteRootFolder, 1) = "\" Then
+	        '    strSiteRootFolder = Left(strSiteRootFolder, Len(strSiteRootFolder) -1)
+            'End If
+            'If Right(strHomeFolder, 1) <> "\" Then
+	        '    strHomeFolder = strHomeFolder & "\"
+            'End If
+        	
+        	'user's home folder
+            'Dim strUploadFolderPath: strUploadFolderPath = strSiteRootFolder & strHomeFolder 
+            ' RG: This method works for local Folders and Virtual Folders
+            Dim strUploadFolderPath: strUploadFolderPath = oSite.GetPhysicalPath(strHomeFolder)
+            If Right(strUploadFolderPath, 1) <> "\" Then
+	            strUploadFolderPath = strUploadFolderPath & "\"
+            End If
+            'path to waiting temp file
+			Dim strTmpWaitFile: strTmpWaitFile = strUploadFolderPath  & "UPLOAD_NOTIFICATION.tmp"
+		
+			'duration in seconds to wait prior to sending upload notification
+			Dim iUploadFileDuration: iUploadFileDuration = GetVariableValue("WaitForUploadsDurationSecs")
+			
+			'waiting temp file exists
+			If oFSO.FileExists(strTmpWaitFile) Then
+			
+				Call Log("INFO: Temp file: " & strTmpWaitFile & ". [SendUploadNotification.wsf, Main()]")
+			
+				'check lest modified date of the wait file
+				Dim oFile: Set oFile = oFSO.GetFile(strTmpWaitFile)
+				Dim dtLastModifiedFile: dtLastModifiedFile = oFile.DateLastModified
+				Dim dtDiff: dtDiff = DateDiff("s", dtLastModifiedFile,now)
+				
+				'if date difference is greater than wait duration 
+				If CLng(dtDiff) >= CLng(iUploadFileDuration) Then
+				
+				    'read the contents of the temp file
+					Dim objTextStream : Set objTextStream = oFSO.OpenTextFile(strTmpWaitFile, 1, False, -2)
+					Call Log("INFO: Reading the contents from temp file " & strTmpWaitFile & ". [SendUploadNotification.wsf, Main()]")
+					Dim strContents: strContents = objTextStream.ReadAll
+					
+					If Err.Number <> 0 Then
+						Call Log("ERROR: Temp file is empty, unable to send upload notification. [SendUploadNotification.wsf, Main()]")
+						WScript.Quit
+					End If
+
+                    'account description
+					Dim sDesc: sDesc = oUser.GetDescription()
+					Dim strDesc
+					Dim iPos: iPos = Instr(sDesc, "temporary account(")
+					If iPos > 0 Then
+						strDesc = Mid(sDesc, iPos)
+					End If
+					Dim iPosStart: iPosStart = InStr(strDesc,"(")
+					Dim iPosEnd: iPosEnd = InStr(strDesc,")")
+					If iPosStart > 0 And iPosEnd > 0 And (iPosEnd > iPosStart) Then
+						sToEmail = Mid(strDesc, iPosStart + 1, (iPosEnd - iPosStart) - 1)
+					End If
+
+					objTextStream.Close
+					Set objTextStream = Nothing
+					
+					Dim sVirtualPath
+					
+					'remove trailing semi-colon
+                    strContents = Left(strContents, Len(strContents) - 2)
+                    if cint(bEmailTemplateFormat)=0 Then  'HTML Format
+                        sVirtualPath = "<br>" & Replace(strContents, ";", "<br>")
+                    else        'Plain Text
+                        sVirtualPath = vbCrLf & Replace(strContents, ";", "")
+                    End If 
+					
+                	
+                    'create physical path from virtual path
+                    Dim arrFiles: arrFiles = Split(strContents, ";")
+                    Dim iFileCount: iFileCount = UBound(arrFiles)
+                    Call Log("INFO: Number of file(s) uploaded is " & iFileCount & ". [SendUploadNotification.wsf, Main()]")
+                    
+                    'full name field from input args
+                    Dim sFullName: sFullName = oUser.FullName
+                    
+                    'file download url
+                    Dim sDownloadPath: sDownloadPath = strURLPattern 'ExtractValueFromFullName(sFullName, "(URL=")
+                    
+                    Dim sUploadedFile: sUploadedFile = ""
+                    Dim strVirtFilePath
+                    For Each strVirtFilePath in arrFiles
+                        if cint(bEmailTemplateFormat)=0 Then  'HTML Format
+                            sUploadedFile = sUploadedFile & "<br>" & trim(GetFileName(strVirtFilePath))
+                        else    'Plain Text
+                                sUploadedFile = sUploadedFile & vbCrLf & trim(GetFileName(strVirtFilePath))
+                        End if
+                        'If iFileCount = 1 AND trim(GetFileName(strVirtFilePath)) <> "" Then                   
+                        '    'if only one file uploaded then show url and file name, otherwise just show the url
+                        '    sDownloadPath = sDownloadPath & "/" & GetFileName(strVirtFilePath)
+                        'End If 
+                    
+                    Next
+
+                     'delete waiting file
+                    If oFSO.FileExists(strTmpWaitFile) then
+                        oFSO.DeleteFile(strTmpWaitFile)
+                        Call Log("INFO: Temp file deleted successfully. [SendUploadNotification.wsf, Main()]")
+	                Else
+	                       Call Log("INFO: Temp file does not exist. [SendUploadNotification.wsf, Main()]")
+	                End If
+                	
+                    'account password
+                    Dim sPwd: sPwd = ExtractValueFromFullName(sFullName, "(PWD=")
+                    Dim sPwd64
+                	
+                    'maintain backwards compatibility by only base64 decoding passwords that use the "PWD64=" text
+                    If "" = sPwd Then
+	                    sPwd64 = ExtractValueFromFullName(sFullName, "(PWD64=")
+	                    sPwd = decode64(sPwd64)
+                    End If
+                	
+                    'image logo used for email
+                    Dim sRemoveImageLogoAttachment: sRemoveImageLogoAttachment = GetVariableValue("RemoveImageLogoAttachment")
+                	
+                	If GetVariableValue("EmailTemplateFormat") = "0" Then   'HTML Template
+                        If trim(LCase(sRemoveImageLogoAttachment)) = "false" Then
+                            Call Log("INFO: Attaching logo to email message. [SendUploadNotification.wsf, Main()]")
+                            txtImageLogoFileName = GetVariableValue("ImageLogoFileName")
+                            txtImageLogoFileName = Replace(txtImageLogoFileName, vbCrLf, "")
+                            txtImageLogoFilePath = GetConfigPath() & "App_Themes\DarkGray\images\" & txtImageLogoFileName
+                            txtImageLogo = "<img src='"& txtImageLogoFileName &"' title='" & IMAGE_TITLE & "' alt='"& IMAGE_TITLE &"'>"
+                        Else
+                            Call Log("INFO: Removing logo from email message. [SendUploadNotification.wsf, Main()]")
+                        End If
+                    Else
+                         Call Log("INFO: Plain text is used, No Logo image is attached. [SendUploadNotification.wsf, Main()]")
+                    End If
+                    
+                    'searching for temporary account string with the description field to distinguish Ad-Hoc users
+                    iPos = InStr(sDesc, sFindString_1)
+                    Dim iStartPos, iEndPos
+                    If (iPos > 0) Then
+                	
+	                    'extract the recipient's email address from the description field
+	                    iStartPos = iPos + len(sFindString_1)
+	                    iEndPos = Instr(iStartPos, sDesc, sFindString_2)
+	                    sToEmail = Mid(sDesc, iStartPos, iEndPos - iStartPos)
+
+	                    'validate the from email address
+	                    If ValidateMail(sToEmail) then
+                            
+                            'from email address
+		                    sFromID = GetVariableValue("SystemEmail")
+                			
+		                    'upload notification email body
+		                    sBody = GetUploadNotificationMailBody(sUserName, sUploadedFile, sVirtualPath, sPwd, sDownloadPath, txtImageLogo)
+                			
+		                    'email message subject
+		                    sSubject = SUBJECT
+		                    sSubject = Replace(sSubject, "%USERNAME%", sUserName)
+		                    sSubject = Replace(sSubject, "%TIMESTAMP%", Now())
+
+		                    'Send mail to recipient
+                            Dim IsBodyHTML :IsBodyHTML = true
+                            if GetVariableValue("EmailTemplateFormat") = "1" Then 
+                                IsBodyHTML =false
+                            End If 
+                            
+		                    Call SendMessage(sFromID, sToEmail, "", "", sSubject, sBody, txtImageLogoFilePath, txtImageLogoFileName, IsBodyHTML)
+		                    Call Log ("INFO: Mail sent was successfuly sent to " & sToEmail & ". [SendUploadNotification.wsf, Main()]")
+                			
+	                    Else
+		                    Call Log ("ERROR: The recipient email address did not meet the complexity requirments " & sToEmail & ". [SendUploadNotification.wsf, Main()]")
+		                    Call Log ("ERROR: Unable to send upload notification message to " & sToEmail & ". [SendUploadNotification.wsf, Main()]")
+	                    End if
+	                    
+	               End If ' iPos
+	               
+	            Else 
+	               Call Log("INFO: Found temp file within '" & sUserName & "' home folder.  Continuing to wait for more files to upload. [SendUploadNotification.wsf, Main()]")
+				End If 'date diff
+			End If 'tmp file exists
+		 Next 'setting level users
+
+        '==============  END : MAIN SCRIPT ROUTINE ========================
+	            
+        '--------------------------------------------------
+        ' NAME: GetFormattedMailBody
+        ' PURPOSE: Retrive formatted mail body
+        '--------------------------------------------------
+        Function GetUploadNotificationMailBody(sUserName, sUploadedFile, sVirtualPath, sPwd, sDownloadPath, txtImageLogo)
+            
+            'retrieve external upload notification template
+            
+            Dim strTemplateName
+            
+            If GetVariableValue("EmailTemplateFormat") = "0" Then   'HTML Template
+                strTemplateName = GetVariableValue("UploadNotificationTemplate")
+            else 'Plain Text
+                strTemplateName = GetVariableValue("UploadNotificationTemplateTextPlain")
+            End If 
+            
+            Call Log("INFO: Upload notification template " & strTemplateName & ". [SendUploadNotification.wsf, GetFormattedMailBody()]")
+            
+            'open template file
+            Dim sBody: sBody = GetMailContentFromTemplate(strTemplateName)
+            
+            'replace template placeholders with actual data
+            sBody = ReplaceMsgTemplate(sBody, sUserName, sUploadedFile, sVirtualPath, sPwd, sDownloadPath, txtImageLogo)
+            
+	        GetUploadNotificationMailBody = sBody
+	        
+        End function
+
+        '-----------------------------------------------------------------
+        ' NAME: ReplaceMsgTemplate
+        ' PURPOSE: Replace the template placeholders with the actual value
+        ' INPUTS: 
+        '-----------------------------------------------------------------
+        Function ReplaceMsgTemplate(sMessage, sUserName, sUploadedFile, sVirtualPath, sPwd, sDownloadPath, txtImageLogo)
+    
+            On Error Resume Next
+            'corrects problem with brackets around download URL
+            sDownloadPath = Replace(sDownloadPath, "}", "")
+            sDownloadPath = Replace(sDownloadPath, "{", "")
+            
+            'replace template placeholders
+	        sMessage	=	Replace(sMessage,"%USERNAME%", sUserName)
+	        sMessage	=	Replace(sMessage,"%FILE_UPLOADED%", sUploadedFile)
+	        sMessage	=	Replace(sMessage,"%FILE_LOCATION%", sVirtualPath)
+	        sMessage	=	Replace(sMessage,"%PASSWORD%", sPwd)
+	        If GetVariableValue("EmailTemplateFormat") = "0" Then   'HTML Template
+	            sMessage	=	Replace(sMessage,"%IMAGE_LOGO%", txtImageLogo)	        
+	        End If
+	        sMessage	=	Replace(sMessage,"%URL%",  sDownloadPath)
+            sMessage	=	Replace(sMessage,"%SINGLE_CLICK_URL%",  sDownloadPath & "?wtcQID=" & encode64(sUserName & ":" & sPwd))
+	        
+	        
+	        
+	        sMessage	=	Replace(sMessage,"%SERVER_TIME%", Now())
+	        
+	        If Err.Number <> 0 Then
+	            Call Log("ERROR: [" & Err.Number & "] " & Err.Description & ". [SendUploadNotification.wsf, ReplaceMsgTemplate()]")    
+	            Call Log("ERROR: There was a problem replacing the placeholder variables in the email template body. [SendUploadNotification.wsf, ReplaceMsgTemplate()]")            
+	            Err.Clear
+	        Else 
+	            Call Log("INFO: Successfully replaced email template placeholder variables. [SendUploadNotification.wsf, ReplaceMsgTemplate()]")
+	        End If
+            On Error Goto 0
+            ReplaceMsgTemplate = sMessage
+            
+        End Function
+	
+    </script>
+  </job>
+</package>
